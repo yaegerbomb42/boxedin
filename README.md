@@ -48,6 +48,14 @@ Data and sandbox live under `data/` and `sandbox/` by default. Use `--data` and 
 - `--cpu <n>`: Sandbox CPU share
 - `--allow-network`: Allow network access inside sandbox (default off)
 
+To allow network in the web server (e.g., for `pip install` inside tools you explicitly request), set:
+
+```
+export SANDBOX_NETWORK=1
+```
+
+By default, the agent avoids third-party libraries and network calls. If you enable network, be mindful of supply-chain risk.
+
 ## CLI
 
 - `boxedin run [--goal <text>]` — Run the agent once or interactively (if no goal).

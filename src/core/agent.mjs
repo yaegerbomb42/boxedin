@@ -17,6 +17,7 @@ Constraints:
 - File IO must stay within the /app sandbox directory.
 - Keep code minimal and focused on the task.
 - Prefer deterministic output; avoid network calls unless asked and safe.
+- Do not use third-party libraries or packages (e.g., \"wikipedia\"), only the standard library unless the user explicitly requests them and network is allowed.
 - Use stdout for tool results, and exit with non-zero on error.`;
 
 function parseJsonBlocks(text) {
@@ -36,12 +37,12 @@ function parseJsonBlocks(text) {
   return null;
 }
 
-function makePlanningPrompt({ goal, tools, memory }) {
+function makePlanningPrompt({ goal, tools, memory, networkAllowed }) {
   const toolDesc = toolsToPrompt(tools);
   const history = summarizeHistory(memory).slice(-20)
     .map(h => `${h.role}: ${h.content.substring(0, 500)}`)
     .join('\n');
-  return `User goal: ${goal}\n\nRelevant history (truncated):\n${history}\n\nIf existing tools suffice, plan to call them. Otherwise, propose new tool(s).\nReturn ONLY a JSON object as a fenced \`json\` block with the shape:\n{\n  "plan": "string",
+  return `User goal: ${goal}\n\nRelevant history (truncated):\n${history}\n\nIf existing tools suffice, plan to call them. Otherwise, propose new tool(s).\nEnvironment: Network is ${networkAllowed ? 'ALLOWED' : 'DISALLOWED'}. ${networkAllowed ? 'If you use third-party packages, include requirements.txt (Python) or package.json (Node) in files.' : 'Do NOT use third-party packages; use only standard library.'}\nReturn ONLY a JSON object as a fenced \`json\` block with the shape:\n{\n  "plan": "string",
   "steps": ["..."],
   "createTools": [
     { "id": "string", "name": "string", "language": "python|node", "entry": "string",
@@ -61,20 +62,20 @@ export async function runAgentLoop({ goal, config, memory, interactive, reporter
   const tools = await loadTools({ sandboxDir: config.sandboxDir });
 
   addHistory(memory, 'user', goal);
-  let planning = await gemini.generate({
+    let planning = await gemini.generate({
     systemPrompt: SYSTEM_PROMPT,
-    toolsDescription: toolsToPrompt(tools),
-    messages: [{ role: 'user', content: makePlanningPrompt({ goal, tools, memory }) }],
+      toolsDescription: toolsToPrompt(tools),
+      messages: [{ role: 'user', content: makePlanningPrompt({ goal, tools, memory, networkAllowed: config.limits?.network !== false }) }],
     temperature: 0.2,
   });
 
   let plan = parseJsonBlocks(planning) || { plan: 'fallback', steps: [], createTools: [], run: [] };
   // If nothing to run or create, try one refinement iteration asking to propose tools
   if ((!plan.createTools || plan.createTools.length === 0) && (!plan.run || plan.run.length === 0)) {
-    const refine = await gemini.generate({
+      const refine = await gemini.generate({
       systemPrompt: SYSTEM_PROMPT,
-      toolsDescription: toolsToPrompt(tools),
-      messages: [{ role: 'user', content: `${makePlanningPrompt({ goal, tools, memory })}\n\nNo actions proposed. Identify missing tools and propose minimal ones, then a run plan.` }],
+        toolsDescription: toolsToPrompt(tools),
+        messages: [{ role: 'user', content: `${makePlanningPrompt({ goal, tools, memory, networkAllowed: config.limits?.network !== false })}\n\nNo actions proposed. Identify missing tools and propose minimal ones, then a run plan.` }],
       temperature: 0.3,
     });
     plan = parseJsonBlocks(refine) || plan;
@@ -185,6 +186,21 @@ export async function runAgentLoop({ goal, config, memory, interactive, reporter
   }
 
   const result = { goal, plan: plan.plan || plan, created, createdFiles, runs, tools: Object.values(tools).map(t => ({ id: t.id, name: t.name, entry: t.entry, language: t.language, purpose: t.purpose })) };
+  // Produce a concise, human-friendly answer summarizing the outcome
+  try {
+    const last = runs[runs.length - 1];
+    const contextText = [
+      `Goal: ${goal}`,
+      plan?.plan ? `Plan: ${typeof plan.plan === 'string' ? plan.plan : JSON.stringify(plan.plan)}` : '',
+      last ? `Last run ${last.id} exit ${last.code}, stdout:\n${(last.stdout||'').slice(0,2000)}\nstderr:\n${(last.stderr||'').slice(0,1000)}` : '',
+    ].filter(Boolean).join('\n\n');
+    const answer = await new GeminiClient({ apiKey: config.gemini.apiKey, model: config.gemini.model, limits: config.limits }).generate({
+      systemPrompt: 'You are a helpful assistant. Respond in clear, plain language. Keep it short (2-5 sentences).',
+      messages: [{ role: 'user', content: `Given the following context, answer the goal directly.\n\n${contextText}` }],
+      temperature: 0.2,
+    });
+    result.answer = (answer || '').trim();
+  } catch {}
   addHistory(memory, 'assistant', JSON.stringify(result));
   memory.runs.push({ goal, steps: plan.steps || [], result, ts: Date.now() });
   await saveMemory(config, memory);

@@ -29,6 +29,10 @@
         <input id="goal" type="text" placeholder="Describe your goal..." />
         <button id="run">Run</button>
       </div>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:12px;">
+        <label><input type="checkbox" id="allowNetwork" /> Allow network</label>
+        <small style="opacity:.8">When enabled, tools may install packages and access the internet inside the sandbox.</small>
+      </div>
       <div style="margin-top:12px">
         <span class="tag">Model: <span id="model">gemini-1.5-flash</span></span>
         <span class="tag">Docker: <span id="docker">checking...</span></span>
@@ -39,8 +43,10 @@
       <div id="tools" class="tools"></div>
       <h3>Live Logs</h3>
       <pre id="logs" class="log"></pre>
-      <h3>Final Result</h3>
-      <pre id="result"></pre>
+  <h3>Summary</h3>
+  <pre id="summary"></pre>
+  <h3>Final Result</h3>
+  <pre id="result"></pre>
     </section>
     <section class="card">
       <h3>Tool Registry</h3>
@@ -51,7 +57,8 @@
     const logs = document.getElementById('logs');
     const plan = document.getElementById('plan');
     const tools = document.getElementById('tools');
-    const result = document.getElementById('result');
+  const result = document.getElementById('result');
+  const summary = document.getElementById('summary');
     const registry = document.getElementById('registry');
 
     function appendLog(text) {
@@ -77,11 +84,11 @@
     }
     refreshRegistry();
 
-    async function runFallback(goal, btn) {
+  async function runFallback(goal, btn) {
       try {
-        const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal }) });
+    const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal, network: document.getElementById('allowNetwork').checked }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const { final, logs: entries } = await res.json();
+  const { final, logs: entries } = await res.json();
         const p = entries.find(e => e.type === 'plan');
         if (p) plan.textContent = typeof p.plan?.plan === 'string' ? p.plan.plan : JSON.stringify(p.plan, null, 2);
         for (const e of entries) {
@@ -89,7 +96,8 @@
           if (e.type === 'runChunk') appendLog(e.info.chunk);
           if (e.type === 'runEnd') appendLog(`\n[${e.info.id}] end code=${e.info.code}\n`);
         }
-        result.textContent = JSON.stringify(final, null, 2);
+  summary.textContent = final.answer || '';
+  result.textContent = JSON.stringify(final, null, 2);
         refreshRegistry();
       } catch (err) {
         appendLog('\nError: ' + (err?.message || String(err)) + '\n');
@@ -107,7 +115,10 @@
       if (!goal) { btn.disabled = false; return; }
 
       let es;
-      try { es = new EventSource('/api/run-stream?goal=' + encodeURIComponent(goal)); } catch { es = null; }
+      try {
+        const allow = document.getElementById('allowNetwork').checked ? '&network=1' : '';
+        es = new EventSource('/api/run-stream?goal=' + encodeURIComponent(goal) + allow);
+      } catch { es = null; }
       if (!es) return runFallback(goal, btn);
 
       es.addEventListener('plan', (e) => {
@@ -131,6 +142,7 @@
       });
       es.addEventListener('result', (e) => {
         const data = JSON.parse(e.data);
+        summary.textContent = (data && data.answer) || '';
         result.textContent = JSON.stringify(data, null, 2);
       });
       es.addEventListener('done', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); });

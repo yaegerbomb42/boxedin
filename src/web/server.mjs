@@ -20,7 +20,7 @@ function makeConfig() {
     dataDir: DATA_DIR,
     sandboxDir: SANDBOX_DIR,
     gemini: { apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' },
-    limits: { maxTokens: 8192, contextWindow: 20000, timeoutMs: parseInt(process.env.SANDBOX_TIMEOUT_MS || '60000', 10), memoryMb: parseInt(process.env.SANDBOX_MEMORY_MB || '512', 10), cpu: process.env.SANDBOX_CPU || '0.5', network: false }
+    limits: { maxTokens: 8192, contextWindow: 20000, timeoutMs: parseInt(process.env.SANDBOX_TIMEOUT_MS || '60000', 10), memoryMb: parseInt(process.env.SANDBOX_MEMORY_MB || '512', 10), cpu: process.env.SANDBOX_CPU || '0.5', network: (process.env.SANDBOX_NETWORK === '1' || process.env.SANDBOX_NETWORK === 'true') }
   };
 }
 
@@ -40,6 +40,7 @@ app.get('/api/run-stream', async (req, res) => {
   const goal = String(req.query.goal || '').trim();
   if (!goal) return res.status(400).end('Missing goal');
   const config = makeConfig();
+  if (req.query.network === '1') config.limits.network = true;
   if (!config.gemini.apiKey) return res.status(400).end('Missing GEMINI_API_KEY');
   const memory = await loadMemory(config);
 
@@ -76,9 +77,10 @@ app.get('/api/run-stream', async (req, res) => {
 
 app.post('/api/run', async (req, res) => {
   try {
-    const goal = String(req.body?.goal || '').trim();
+  const goal = String(req.body?.goal || '').trim();
     if (!goal) return res.status(400).json({ error: 'Missing goal' });
     const config = makeConfig();
+  if (req.body?.network) config.limits.network = true;
     if (!config.gemini.apiKey) return res.status(400).json({ error: 'Missing GEMINI_API_KEY' });
     const memory = await loadMemory(config);
     const logs = [];

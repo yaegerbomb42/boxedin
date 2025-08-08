@@ -52,6 +52,7 @@
     const plan = document.getElementById('plan');
     const tools = document.getElementById('tools');
     const result = document.getElementById('result');
+    const registry = document.getElementById('registry');
 
     function appendLog(text) {
       logs.textContent += text;
@@ -68,39 +69,73 @@
       tools.appendChild(div);
     }
 
-    const evt = new EventSource('/events');
-    evt.addEventListener('plan', (e) => {
-      plan.textContent = JSON.stringify(JSON.parse(e.data), null, 2);
-    });
-    evt.addEventListener('createTools', (e) => {
-      const arr = JSON.parse(e.data);
-      arr.forEach(addToolCard);
-    });
-    evt.addEventListener('runStart', (e) => {
-      const info = JSON.parse(e.data);
-      appendLog(`\n[${info.id}] start args=${JSON.stringify(info.args)}\n`);
-    });
-    evt.addEventListener('runChunk', (e) => {
-      const info = JSON.parse(e.data);
-      appendLog(info.chunk);
-    });
-    evt.addEventListener('runEnd', (e) => {
-      const info = JSON.parse(e.data);
-      appendLog(`\n[${info.id}] end code=${info.code}\n`);
-    });
-    evt.addEventListener('result', (e) => {
-      result.textContent = JSON.stringify(JSON.parse(e.data), null, 2);
-    });
+    async function refreshRegistry() {
+      try {
+        const list = await fetch('/api/tools').then(r => r.json());
+        registry.textContent = list.map(t => `• ${t.name} [${t.id}] (${t.language}) → ${t.entry}`).join('\n');
+      } catch { registry.textContent = '(failed to load)'; }
+    }
+    refreshRegistry();
+
+    async function runFallback(goal, btn) {
+      try {
+        const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal }) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const { final, logs: entries } = await res.json();
+        const p = entries.find(e => e.type === 'plan');
+        if (p) plan.textContent = typeof p.plan?.plan === 'string' ? p.plan.plan : JSON.stringify(p.plan, null, 2);
+        for (const e of entries) {
+          if (e.type === 'runStart') appendLog(`\n[${e.info.id}] start args=${JSON.stringify(e.info.args)}\n`);
+          if (e.type === 'runChunk') appendLog(e.info.chunk);
+          if (e.type === 'runEnd') appendLog(`\n[${e.info.id}] end code=${e.info.code}\n`);
+        }
+        result.textContent = JSON.stringify(final, null, 2);
+        refreshRegistry();
+      } catch (err) {
+        appendLog('\nError: ' + (err?.message || String(err)) + '\n');
+      } finally { btn.disabled = false; }
+    }
 
     document.getElementById('run').onclick = async () => {
+      const btn = document.getElementById('run');
+      btn.disabled = true;
       logs.textContent = '';
       tools.innerHTML = '';
       plan.textContent = '';
       result.textContent = '';
-      const goal = document.getElementById('goal').value;
-      const res = await fetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal }) });
-      const json = await res.json();
-      document.getElementById('registry').textContent = JSON.stringify(json.tools, null, 2);
+      const goal = document.getElementById('goal').value.trim();
+      if (!goal) { btn.disabled = false; return; }
+
+      let es;
+      try { es = new EventSource('/api/run-stream?goal=' + encodeURIComponent(goal)); } catch { es = null; }
+      if (!es) return runFallback(goal, btn);
+
+      es.addEventListener('plan', (e) => {
+        const data = JSON.parse(e.data);
+        plan.textContent = typeof data.plan === 'string' ? data.plan : JSON.stringify(data, null, 2);
+      });
+      es.addEventListener('createTools', (e) => {
+        try { JSON.parse(e.data).forEach(addToolCard); } catch {}
+      });
+      es.addEventListener('runStart', (e) => {
+        const info = JSON.parse(e.data);
+        appendLog(`\n[${info.id}] start args=${JSON.stringify(info.args)}${info.stdinPreview? ' stdin: ' + JSON.stringify(info.stdinPreview): ''}\n`);
+      });
+      es.addEventListener('runChunk', (e) => {
+        const info = JSON.parse(e.data);
+        appendLog(info.chunk);
+      });
+      es.addEventListener('runEnd', (e) => {
+        const info = JSON.parse(e.data);
+        appendLog(`\n[${info.id}] end code=${info.code}\n`);
+      });
+      es.addEventListener('result', (e) => {
+        const data = JSON.parse(e.data);
+        result.textContent = JSON.stringify(data, null, 2);
+      });
+      es.addEventListener('done', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); });
+      es.addEventListener('complete', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); });
+      es.onerror = () => { try { es.close(); } catch {}; runFallback(goal, btn); };
     };
   </script>
 </body>

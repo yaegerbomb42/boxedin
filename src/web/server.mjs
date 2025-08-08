@@ -74,6 +74,29 @@ app.get('/api/run-stream', async (req, res) => {
   }
 });
 
+app.post('/api/run', async (req, res) => {
+  try {
+    const goal = String(req.body?.goal || '').trim();
+    if (!goal) return res.status(400).json({ error: 'Missing goal' });
+    const config = makeConfig();
+    if (!config.gemini.apiKey) return res.status(400).json({ error: 'Missing GEMINI_API_KEY' });
+    const memory = await loadMemory(config);
+    const logs = [];
+    const reporter = {
+      plan: (plan) => logs.push({ type: 'plan', plan }),
+      createTools: (list) => logs.push({ type: 'createTools', list }),
+      runStart: (info) => logs.push({ type: 'runStart', info }),
+      runChunk: (info) => logs.push({ type: 'runChunk', info }),
+      runEnd: (info) => logs.push({ type: 'runEnd', info }),
+      result: (r) => logs.push({ type: 'result', r }),
+    };
+    const final = await runAgentLoop({ goal, config, memory, interactive: false, reporter });
+    res.json({ final, logs });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 // Backward compatibility: global SSE and /run JSON endpoint
 const clients = new Set();
 app.get('/events', (req, res) => {

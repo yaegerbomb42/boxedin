@@ -74,6 +74,49 @@ app.get('/api/run-stream', async (req, res) => {
   }
 });
 
+// Backward compatibility: global SSE and /run JSON endpoint
+const clients = new Set();
+app.get('/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  const client = { res };
+  clients.add(client);
+  req.on('close', () => clients.delete(client));
+});
+function broadcast(event, data) {
+  for (const { res } of clients) {
+    try {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch {}
+  }
+}
+app.post('/run', async (req, res) => {
+  const goal = String(req.body?.goal || '').trim();
+  if (!goal) return res.status(400).json({ error: 'Missing goal' });
+  const config = makeConfig();
+  if (!config.gemini.apiKey) return res.status(400).json({ error: 'Missing GEMINI_API_KEY' });
+  const memory = await loadMemory(config);
+  const reporter = {
+    plan: (plan) => broadcast('plan', plan),
+    createTools: (list) => broadcast('createTools', list),
+    runStart: (info) => broadcast('runStart', info),
+    runChunk: (info) => broadcast('runChunk', info),
+    runEnd: (info) => broadcast('runEnd', info),
+    result: (r) => broadcast('result', r),
+    done: (r) => broadcast('done', r),
+    error: (e) => broadcast('error', e),
+  };
+  try {
+    const final = await runAgentLoop({ goal, config, memory, interactive: false, reporter });
+    res.json(final);
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`BoxedIn web listening on http://localhost:${PORT}`);

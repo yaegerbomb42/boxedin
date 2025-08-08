@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BoxedIn Agent</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #0b0f14; color: #e6edf3; }
+    header { padding: 12px 16px; background: #111826; border-bottom: 1px solid #1f2937; }
+    main { padding: 16px; display: grid; grid-template-columns: 420px 1fr; gap: 16px; }
+    .card { background: #0f1622; border: 1px solid #1f2937; border-radius: 8px; padding: 12px; }
+    .row { display: flex; gap: 8px; }
+    input[type=text] { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #334155; background: #0b1320; color: #e6edf3; }
+    button { padding: 10px 14px; border-radius: 6px; border: 1px solid #334155; background: #1b2432; color: #e6edf3; cursor: pointer; }
+    pre { background: #0b1320; border: 1px solid #334155; padding: 10px; border-radius: 6px; overflow: auto; }
+    .tag { display: inline-block; font-size: 12px; padding: 2px 6px; border-radius: 4px; margin-right: 6px; background: #1b2432; border:1px solid #334155; }
+    .log { height: 240px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .tools { max-height: 240px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>BoxedIn Agent</h2>
+  </header>
+  <main>
+    <section class="card">
+      <h3>Goal</h3>
+      <div class="row">
+        <input id="goal" type="text" placeholder="Describe your goal..." />
+        <button id="run">Run</button>
+      </div>
+      <div style="margin-top:12px">
+        <span class="tag">Model: <span id="model">gemini-1.5-flash</span></span>
+        <span class="tag">Docker: <span id="docker">checking...</span></span>
+      </div>
+      <h3 style="margin-top:16px">Plan</h3>
+      <pre id="plan"></pre>
+      <h3>Created Tools</h3>
+      <div id="tools" class="tools"></div>
+      <h3>Live Logs</h3>
+      <pre id="logs" class="log"></pre>
+      <h3>Final Result</h3>
+      <pre id="result"></pre>
+    </section>
+    <section class="card">
+      <h3>Tool Registry</h3>
+      <div id="registry"></div>
+    </section>
+  </main>
+  <script>
+    const logs = document.getElementById('logs');
+    const plan = document.getElementById('plan');
+    const tools = document.getElementById('tools');
+    const result = document.getElementById('result');
+
+    function appendLog(text) {
+      logs.textContent += text;
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    function addToolCard(tool) {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.style.margin = '8px 0';
+      div.innerHTML = `<strong>${tool.name}</strong> <small>[${tool.id}]</small><br>
+        <span class="tag">${tool.language}</span> entry: <code>${tool.entry}</code><br>
+        <em>${tool.purpose || ''}</em>`;
+      tools.appendChild(div);
+    }
+
+    const evt = new EventSource('/events');
+    evt.addEventListener('plan', (e) => {
+      plan.textContent = JSON.stringify(JSON.parse(e.data), null, 2);
+    });
+    evt.addEventListener('createTools', (e) => {
+      const arr = JSON.parse(e.data);
+      arr.forEach(addToolCard);
+    });
+    evt.addEventListener('runStart', (e) => {
+      const info = JSON.parse(e.data);
+      appendLog(`\n[${info.id}] start args=${JSON.stringify(info.args)}\n`);
+    });
+    evt.addEventListener('runChunk', (e) => {
+      const info = JSON.parse(e.data);
+      appendLog(info.chunk);
+    });
+    evt.addEventListener('runEnd', (e) => {
+      const info = JSON.parse(e.data);
+      appendLog(`\n[${info.id}] end code=${info.code}\n`);
+    });
+    evt.addEventListener('result', (e) => {
+      result.textContent = JSON.stringify(JSON.parse(e.data), null, 2);
+    });
+
+    document.getElementById('run').onclick = async () => {
+      logs.textContent = '';
+      tools.innerHTML = '';
+      plan.textContent = '';
+      result.textContent = '';
+      const goal = document.getElementById('goal').value;
+      const res = await fetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goal }) });
+      const json = await res.json();
+      document.getElementById('registry').textContent = JSON.stringify(json.tools, null, 2);
+    };
+  </script>
+</body>
+</html>

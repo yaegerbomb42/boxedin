@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# BoxedIn CLI entry. Delegates to Node CLI.
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+exec node "$DIR/src/cli.mjs" "$@"

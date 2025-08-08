@@ -1,0 +1,29 @@
+{
+  "name": "boxedin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Autonomous AI agent with sandboxed tool creation and execution using Google Gemini.",
+  "bin": {
+    "boxedin": "bin/boxedin"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "agent": "node src/cli.mjs run",
+    "status": "node src/cli.mjs status",
+    "export": "node src/cli.mjs export",
+    "import": "node src/cli.mjs import",
+    "web": "node src/web/server.mjs",
+    "lint": "node -e \"console.log('No linter configured')\""
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "commander": "^12.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "fs-extra": "^11.2.0",
+    "nanoid": "^5.0.7",
+    "p-limit": "^6.2.0",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  }
+}

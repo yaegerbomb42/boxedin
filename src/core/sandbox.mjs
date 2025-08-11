@@ -55,7 +55,8 @@ export class Sandbox {
         if (language === 'python' && hasPyReq) {
           // install to a local site-packages directory inside the toolDir
           const site = path.posix.join('/app', toolRel, '.site');
-          await this._spawnWithLogs({ command: 'docker', args: [...argsDocker, image, 'sh', '-lc', `pip install --no-cache-dir -t ${site} -r ${path.posix.join('/app', toolRel, 'requirements.txt')}`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
+          const req = path.posix.join('/app', toolRel, 'requirements.txt');
+          await this._spawnWithLogs({ command: 'docker', args: [...argsDocker, image, 'sh', '-lc', `python -m pip install --no-cache-dir -t ${site} -r ${req}`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
           envVars['PYTHONPATH'] = site;
         }
         if (language === 'node' && hasNodePkg) {
@@ -72,7 +73,7 @@ export class Sandbox {
     if (this.limits.network !== false) {
       if (language === 'python' && hasPyReq) {
         const site = path.join(toolDir, '.site');
-        await this._spawnWithLogs({ command: 'sh', args: ['-lc', `pip3 install --no-cache-dir -t ${site} -r ${pyReq}`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
+        await this._spawnWithLogs({ command: 'sh', args: ['-lc', `python3 -m pip install --no-cache-dir -t ${site} -r ${pyReq}`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
         envVars['PYTHONPATH'] = site;
       }
       if (language === 'node' && hasNodePkg) {

@@ -51,14 +51,19 @@
       </div>
       <h3 style="margin-top:16px">Plan</h3>
       <pre id="plan"></pre>
-      <h3>Created Tools</h3>
-      <div id="tools" class="tools"></div>
+      <h3>Answer</h3>
+      <pre id="summary"></pre>
       <h3>Live Logs</h3>
       <pre id="logs" class="log"></pre>
-  <h3>Summary</h3>
-  <pre id="summary"></pre>
-  <h3>Final Result</h3>
-  <pre id="result"></pre>
+      <details style="margin-top:8px">
+        <summary>Details</summary>
+        <h4>Plan</h4>
+        <pre id="plan"></pre>
+        <h4>Created Tools</h4>
+        <div id="tools" class="tools"></div>
+        <h4>Final Result (raw)</h4>
+        <pre id="result"></pre>
+      </details>
     </section>
     <section class="card">
       <h3>Tool Registry</h3>
@@ -155,7 +160,7 @@
         const info = JSON.parse(e.data);
         appendLog(`\n[${info.id}] end code=${info.code}\n`);
       });
-      es.addEventListener('result', (e) => {
+  es.addEventListener('result', (e) => {
         const data = JSON.parse(e.data);
         summary.textContent = (data && data.answer) || '';
         result.textContent = JSON.stringify(data, null, 2);

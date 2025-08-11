@@ -57,7 +57,7 @@ function makePlanningPrompt({ goal, tools, memory, networkAllowed }) {
 export async function runAgentLoop({ goal, config, memory, interactive, reporter }) {
   const logsDir = path.join(config.dataDir, 'logs');
   await fs.ensureDir(logsDir);
-  const sandbox = new Sandbox({ sandboxDir: config.sandboxDir, logsDir });
+  const sandbox = new Sandbox({ sandboxDir: config.sandboxDir, logsDir, limits: config.limits || {} });
   const gemini = new GeminiClient({ apiKey: config.gemini.apiKey, model: config.gemini.model, limits: config.limits });
   const tools = await loadTools({ sandboxDir: config.sandboxDir });
 
@@ -160,7 +160,7 @@ export async function runAgentLoop({ goal, config, memory, interactive, reporter
       console.log(`\n[${id}] args=${JSON.stringify(args)}${stdin ? ' stdin preview: ' + JSON.stringify(stdin.slice(0,120)) : ''}`);
     }
     reporter?.runStart({ id, args });
-    const res = await sandbox.run({ language: t.language, entry: path.join('tools', id, t.entry), args, stdin, runId: `${id}-${Date.now()}`,
+    let res = await sandbox.run({ language: t.language, entry: path.join('tools', id, t.entry), args, stdin, runId: `${id}-${Date.now()}`,
       onStdout: (s)=>{ if (interactive) process.stdout.write(s); reporter?.runChunk({ id, stream: 'stdout', chunk: s }); },
       onStderr: (s)=>{ if (interactive) process.stderr.write(s); reporter?.runChunk({ id, stream: 'stderr', chunk: s }); },
     });
@@ -169,8 +169,65 @@ export async function runAgentLoop({ goal, config, memory, interactive, reporter
   runIndex[id] = runSummary;
   lastRun = runSummary;
     reporter?.runEnd({ id, code: res.code });
-    // If non-zero, attempt one iteration of fix via Gemini
+    // If non-zero, try to auto-fix common missing dependency errors when network is allowed, then one LLM-based fix.
   if (res.code !== 0) {
+      let autoFixed = false;
+      if (config.limits?.network !== false) {
+        try {
+          const toolDir = path.join(config.sandboxDir, 'tools', id);
+          const stderr = String(res.stderr || '');
+          if (t.language === 'python') {
+            const m = stderr.match(/ModuleNotFoundError: No module named ['"]([^'\"]+)['"]/);
+            if (m && m[1]) {
+              const pkg = m[1];
+              const reqPath = path.join(toolDir, 'requirements.txt');
+              const exists = await fs.pathExists(reqPath);
+              const content = exists ? await fs.readFile(reqPath, 'utf8') : '';
+              if (!content.split(/\r?\n/).some(line => line.trim() === pkg)) {
+                await fs.appendFile(reqPath, (content && !content.endsWith('\n') ? '\n' : '') + pkg + '\n');
+              }
+              // Retry with requirements installation
+              const retry = await sandbox.run({ language: t.language, entry: path.join('tools', id, t.entry), args, stdin, runId: `${id}-deps-${Date.now()}`,
+                onStdout: (s)=>{ if (interactive) process.stdout.write(s); reporter?.runChunk({ id, stream: 'stdout', chunk: s }); },
+                onStderr: (s)=>{ if (interactive) process.stderr.write(s); reporter?.runChunk({ id, stream: 'stderr', chunk: s }); },
+              });
+              runs.push({ id, retry: true, reason: 'auto-install-python', ...retry });
+              runIndex[id] = retry;
+              lastRun = retry;
+              reporter?.runEnd({ id, code: retry.code });
+              res = retry;
+              if (retry.code === 0) autoFixed = true;
+            }
+          } else if (t.language === 'node') {
+            const m = stderr.match(/Cannot find module ['"]([^'\"]+)['"]/);
+            if (m && m[1]) {
+              const pkg = m[1];
+              const pkgJsonPath = path.join(toolDir, 'package.json');
+              let pkgJson = { name: id, version: '0.0.0', private: true, dependencies: {} };
+              if (await fs.pathExists(pkgJsonPath)) {
+                try { pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, 'utf8')); } catch {}
+                if (!pkgJson.dependencies) pkgJson.dependencies = {};
+              }
+              if (!pkgJson.dependencies[pkg]) {
+                pkgJson.dependencies[pkg] = '*';
+                await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson, null, 2));
+              }
+              const retry = await sandbox.run({ language: t.language, entry: path.join('tools', id, t.entry), args, stdin, runId: `${id}-deps-${Date.now()}`,
+                onStdout: (s)=>{ if (interactive) process.stdout.write(s); reporter?.runChunk({ id, stream: 'stdout', chunk: s }); },
+                onStderr: (s)=>{ if (interactive) process.stderr.write(s); reporter?.runChunk({ id, stream: 'stderr', chunk: s }); },
+              });
+              runs.push({ id, retry: true, reason: 'auto-install-node', ...retry });
+              runIndex[id] = retry;
+              lastRun = retry;
+              reporter?.runEnd({ id, code: retry.code });
+              res = retry;
+              if (retry.code === 0) autoFixed = true;
+            }
+          }
+        } catch {}
+      }
+      // If still failing, attempt one iteration of fix via Gemini
+      if (!autoFixed && res.code !== 0) {
       const fixPrompt = `Tool ${t.name} failed. stderr:\n${res.stderr}\n\nPropose a minimal patch to fix. Return JSON {files:{path: content}}`;
       const fix = await gemini.generate({ systemPrompt: SYSTEM_PROMPT, messages: [{ role: 'user', content: fixPrompt }], temperature: 0.2 });
       const fixJson = parseJsonBlocks(fix);
@@ -181,6 +238,7 @@ export async function runAgentLoop({ goal, config, memory, interactive, reporter
           onStderr: interactive ? (s)=>process.stderr.write(s) : undefined,
         });
         runs.push({ id, retry: true, ...retry });
+      }
       }
     }
   }

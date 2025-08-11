@@ -50,7 +50,7 @@ program
     const config = {
       dataDir: baseDir,
       sandboxDir,
-      gemini: { apiKey: process.env.GEMINI_API_KEY, model: program.opts().model },
+    gemini: { apiKey: 'AIzaSyAZaPRI1AUdH8pRJqHjQnfhLAKt9E5fTdo', model: program.opts().model },
       limits: { maxTokens: 8192, contextWindow: 20000, timeoutMs: program.opts().timeoutMs, memoryMb: program.opts().memoryMb, cpu: program.opts().cpu, network: program.opts().allowNetwork },
     };
 

@@ -19,7 +19,7 @@ function makeConfig() {
   return {
     dataDir: DATA_DIR,
     sandboxDir: SANDBOX_DIR,
-    gemini: { apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' },
+  gemini: { apiKey: 'AIzaSyAZaPRI1AUdH8pRJqHjQnfhLAKt9E5fTdo', model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' },
     limits: {
       maxTokens: 8192,
       contextWindow: 20000,

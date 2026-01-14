@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { runAgentLoop } from './core/agent.mjs';
+import { getDefaultLimits } from './core/limits.mjs';
 import { exportAll, importAll, loadMemory } from './core/memory.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,6 +17,9 @@ program
 
 const defaultDataDir = path.join(__dirname, '..', 'data');
 const defaultSandboxDir = path.join(__dirname, '..', 'sandbox');
+const defaultLimits = getDefaultLimits();
+const defaultModel = process.env.GEMINI_MODEL || 'gemini-3-flash';
+const geminiApiKey = 'AIzaSyAvzNpziSosmT7m0av5mAHUn-LAdCQ5afI';
 
 function ensureDirs(baseDir, sandboxDir) {
   fs.ensureDirSync(baseDir);
@@ -28,11 +32,11 @@ function ensureDirs(baseDir, sandboxDir) {
 
 program.option('-d, --data <dir>', 'Data directory for memory/logs', defaultDataDir);
 program.option('-s, --sandbox <dir>', 'Sandbox directory for tools and runs', defaultSandboxDir);
-program.option('--model <name>', 'Gemini model name', process.env.GEMINI_MODEL || 'gemini-1.5-flash');
-program.option('--timeout-ms <n>', 'Sandbox timeout ms', (v) => parseInt(v, 10), parseInt(process.env.SANDBOX_TIMEOUT_MS || '60000', 10));
-program.option('--memory-mb <n>', 'Sandbox memory MB', (v) => parseInt(v, 10), parseInt(process.env.SANDBOX_MEMORY_MB || '512', 10));
-program.option('--cpu <n>', 'Sandbox CPU (e.g., 0.5, 1, 2)', process.env.SANDBOX_CPU || '0.5');
-program.option('--allow-network', 'Allow network in sandbox containers', false);
+program.option('--model <name>', 'Gemini model name (gemini-3-flash, gemini-3-pro-preview)', defaultModel);
+program.option('--timeout-ms <n>', 'Sandbox timeout ms', (v) => parseInt(v, 10), defaultLimits.timeoutMs);
+program.option('--memory-mb <n>', 'Sandbox memory MB', (v) => parseInt(v, 10), defaultLimits.memoryMb);
+program.option('--cpu <n>', 'Sandbox CPU (e.g., 1, 2, 4)', defaultLimits.cpu);
+program.option('--allow-network', 'Allow network in sandbox containers', defaultLimits.network);
 
 program
   .command('run')
@@ -50,8 +54,15 @@ program
     const config = {
       dataDir: baseDir,
       sandboxDir,
-    gemini: { apiKey: 'AIzaSyAZaPRI1AUdH8pRJqHjQnfhLAKt9E5fTdo', model: program.opts().model },
-      limits: { maxTokens: 8192, contextWindow: 20000, timeoutMs: program.opts().timeoutMs, memoryMb: program.opts().memoryMb, cpu: program.opts().cpu, network: program.opts().allowNetwork },
+      gemini: { apiKey: geminiApiKey, model: program.opts().model },
+      limits: {
+        maxTokens: defaultLimits.maxTokens,
+        contextWindow: defaultLimits.contextWindow,
+        timeoutMs: program.opts().timeoutMs,
+        memoryMb: program.opts().memoryMb,
+        cpu: program.opts().cpu,
+        network: program.opts().allowNetwork,
+      },
     };
 
     if (!config.gemini.apiKey) {

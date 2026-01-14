@@ -8,10 +8,13 @@ import { loadTools, saveTool, toolsToPrompt, writeToolCode } from './tools.mjs';
 const SYSTEM_PROMPT = `You are an autonomous software agent. You can:
 - Plan steps to achieve a user's goal.
 - Reuse existing tools when possible.
-- Create new tools (code files) in Python or Node when needed.
+ - Create new tools (code files) in Python, Node, Bash, Shell, or Ruby when needed.
 - Write clear manifests and minimal, executable code.
 - Test tools using the sandbox executor and iterate on failures.
 - Return structured JSON describing your plan, actions, and code.
+- When a goal is ambiguous, state your assumptions briefly and proceed.
+- Be proactive: if there is a low-effort improvement or verification step, include it.
+- Optimize for reliable outcomes and tool reuse; avoid unnecessary complexity.
 
 Constraints:
 - File IO must stay within the /app sandbox directory.
@@ -42,10 +45,10 @@ function makePlanningPrompt({ goal, tools, memory, networkAllowed }) {
   const history = summarizeHistory(memory).slice(-20)
     .map(h => `${h.role}: ${h.content.substring(0, 500)}`)
     .join('\n');
-  return `User goal: ${goal}\n\nRelevant history (truncated):\n${history}\n\nIf existing tools suffice, plan to call them. Otherwise, propose new tool(s).\nEnvironment: Network is ${networkAllowed ? 'ALLOWED' : 'DISALLOWED'}. ${networkAllowed ? 'If you use third-party packages, include requirements.txt (Python) or package.json (Node) in files.' : 'Do NOT use third-party packages; use only standard library.'}\nReturn ONLY a JSON object as a fenced \`json\` block with the shape:\n{\n  "plan": "string",
+  return `User goal: ${goal}\n\nRelevant history (truncated):\n${history}\n\nIf existing tools suffice, plan to call them. Otherwise, propose new tool(s).\nInclude brief assumptions if the goal is underspecified.\nEnvironment: Network is ${networkAllowed ? 'ALLOWED' : 'DISALLOWED'}. ${networkAllowed ? 'If you use third-party packages, include requirements.txt (Python) or package.json (Node) in files.' : 'Do NOT use third-party packages; use only standard library.'}\nReturn ONLY a JSON object as a fenced \`json\` block with the shape:\n{\n  "plan": "string",
   "steps": ["..."],
   "createTools": [
-    { "id": "string", "name": "string", "language": "python|node", "entry": "string",
+    { "id": "string", "name": "string", "language": "python|node|bash|sh|ruby", "entry": "string",
       "purpose": "string", "files": { "path": "content" },
       "inputs": [{"name":"x","type":"string"}], "outputs": [{"name":"y","type":"json"}],
       "usage": "example" }

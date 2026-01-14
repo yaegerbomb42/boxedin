@@ -1,24 +1,20 @@
 # BoxedIn — Autonomous AI Agent with Sandboxed Tooling
 
-BoxedIn is a modular AI agent that uses Google Gemini to plan, create, and reuse sandboxed tools (Python/Node) to achieve user goals. It persists memory, captures execution logs, and provides a CLI.
+BoxedIn is a modular AI agent that uses Google Gemini to plan, create, and reuse sandboxed tools (Python/Node/Bash/Ruby) to achieve user goals. It persists memory, captures execution logs, and provides a CLI.
 
 ## Features
 
 - Gemini-powered reasoning with long-context trimming
-- Persistent memory: tool registry, conversation history, and run results
+- Persistent memory (SQLite): tool registry, conversation history, and run results
 - Dynamic tool creation with manifests (name, purpose, inputs/outputs, usage)
 - Sandboxed execution via Docker (preferred) or local fallback (cwd-confined)
-- Supports Python and Node.js tools
+- Supports Python, Node.js, Bash/Shell, and Ruby tools
 - Iterative self-fix loop on failures
 - CLI for running goals, inspecting status, and exporting/importing state
 
 ## Quick Start
 
-1. Prereqs: Node 20+, optionally Docker. Set your Google Gemini API key.
-
-```
-export GEMINI_API_KEY=... # required
-```
+1. Prereqs: Node 20+, optionally Docker.
 
 2. Install deps:
 
@@ -42,19 +38,19 @@ Data and sandbox live under `data/` and `sandbox/` by default. Use `--data` and 
 
 ### Configuration flags
 
-- `--model <name>`: Gemini model (default `gemini-1.5-flash`)
+- `--model <name>`: Gemini model (default `gemini-3-flash`, or `gemini-3-pro-preview`)
 - `--timeout-ms <n>`: Sandbox execution timeout
 - `--memory-mb <n>`: Sandbox memory limit
 - `--cpu <n>`: Sandbox CPU share
-- `--allow-network`: Allow network access inside sandbox (default off)
+- `--allow-network`: Allow network access inside sandbox (default on; use `--no-allow-network` to disable)
 
-To allow network in the web server (e.g., for `pip install` inside tools you explicitly request), set:
+To override the network default for the web server (e.g., for `pip install` inside tools you explicitly request), set:
 
 ```
-export SANDBOX_NETWORK=1
+export SANDBOX_NETWORK=0
 ```
 
-By default, the agent avoids third-party libraries and network calls. If you enable network, be mindful of supply-chain risk.
+By default, the agent avoids third-party libraries and network calls even when network is allowed. If you enable network, be mindful of supply-chain risk.
 
 ## CLI
 
@@ -66,7 +62,7 @@ By default, the agent avoids third-party libraries and network calls. If you ena
 ## Architecture
 
 - `src/core/gemini.mjs` — Gemini wrapper with basic context management
-- `src/core/memory.mjs` — Persistent JSON memory, export/import
+- `src/core/memory.mjs` — Persistent SQLite memory, export/import
 - `src/core/sandbox.mjs` — Sandboxed execution using Docker or local fallback
 - `src/core/tools.mjs` — Tool manifest schema and load/save helpers
 - `src/core/agent.mjs` — Agent loop: plan, create/execute tools, iterate on failures
@@ -81,7 +77,7 @@ Each tool is stored under `sandbox/tools/<id>/` with a `manifest.json`:
 	"id": "sentiment-123",
 	"name": "Simple Sentiment",
 	"purpose": "Counts positive/negative words",
-	"language": "python", // or "node"
+	"language": "python", // or "node", "bash", "sh", "ruby"
 	"entry": "main.py",
 	"inputs": [{"name": "text", "type": "string"}],
 	"outputs": [{"name": "summary", "type": "json"}],
@@ -99,9 +95,8 @@ Each tool is stored under `sandbox/tools/<id>/` with a `manifest.json`:
 
 ## Extensibility
 
-- Add support for more languages by extending the sandbox runner.
-- Swap memory store for SQLite while preserving the same interface.
-- Implement a web UI by calling the agent loop and exposing memory/logs.
+- Extend the sandbox runner with additional language runtimes.
+- Add more UI affordances around memory and logs.
 
 ## License
 

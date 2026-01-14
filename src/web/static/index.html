@@ -28,6 +28,9 @@
     .tag { display: inline-block; font-size: 12px; padding: 2px 6px; border-radius: 4px; margin-right: 6px; background: #1b2432; border:1px solid #334155; }
     .log { height: 240px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
     .tools { max-height: 240px; overflow: auto; }
+    .muted { opacity: 0.7; }
+    .list { white-space: pre-wrap; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; border: 1px solid #334155; background: #0b1320; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -42,11 +45,11 @@
         <button id="run">Run</button>
       </div>
       <div style="margin-top:8px; display:flex; align-items:center; gap:12px;">
-        <label><input type="checkbox" id="allowNetwork" /> Allow network</label>
+        <label><input type="checkbox" id="allowNetwork" checked /> Allow network</label>
         <small style="opacity:.8">When enabled, tools may install packages and access the internet inside the sandbox.</small>
       </div>
       <div style="margin-top:12px">
-        <span class="tag">Model: <span id="model">gemini-1.5-flash</span></span>
+        <span class="tag">Model: <span id="model">loading...</span></span>
         <span class="tag">Docker: <span id="docker">checking...</span></span>
       </div>
       <h3 style="margin-top:16px">Plan</h3>
@@ -67,16 +70,30 @@
     </section>
     <section class="card">
       <h3>Tool Registry</h3>
-      <div id="registry"></div>
+      <div id="registry" class="tools"></div>
+      <div id="registryEmpty" class="muted">(no tools yet)</div>
+      <h3 style="margin-top:16px">Status</h3>
+      <div id="status" class="list muted">Loading...</div>
+      <h3 style="margin-top:16px">Memory</h3>
+      <pre id="memory">(loading...)</pre>
+      <h3 style="margin-top:16px">Latest Result</h3>
+      <pre id="latestResult">(none yet)</pre>
+      <h3 style="margin-top:16px">Recent Logs</h3>
+      <pre id="recentLogs" class="log">(loading...)</pre>
     </section>
   </main>
   <script>
     const logs = document.getElementById('logs');
     const plan = document.getElementById('plan');
     const tools = document.getElementById('tools');
-  const result = document.getElementById('result');
-  const summary = document.getElementById('summary');
+    const result = document.getElementById('result');
+    const summary = document.getElementById('summary');
     const registry = document.getElementById('registry');
+    const registryEmpty = document.getElementById('registryEmpty');
+    const statusPane = document.getElementById('status');
+    const memoryPane = document.getElementById('memory');
+    const latestResult = document.getElementById('latestResult');
+    const recentLogs = document.getElementById('recentLogs');
 
     function appendLog(text) {
       logs.textContent += text;
@@ -96,10 +113,85 @@
     async function refreshRegistry() {
       try {
         const list = await fetch('/api/tools').then(r => r.json());
-        registry.textContent = list.map(t => `• ${t.name} [${t.id}] (${t.language}) → ${t.entry}`).join('\n');
-      } catch { registry.textContent = '(failed to load)'; }
+        registry.innerHTML = '';
+        if (!list.length) {
+          registryEmpty.style.display = 'block';
+          return;
+        }
+        registryEmpty.style.display = 'none';
+        for (const tool of list) {
+          const div = document.createElement('div');
+          div.className = 'card';
+          div.style.margin = '8px 0';
+          div.innerHTML = `
+            <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+              <strong>${tool.name}</strong>
+              <span class="pill">${tool.language}</span>
+            </div>
+            <div class="muted">id: ${tool.id}</div>
+            <div class="muted">entry: <code>${tool.entry}</code></div>
+            <div>${tool.purpose || ''}</div>
+          `;
+          registry.appendChild(div);
+        }
+      } catch {
+        registry.innerHTML = '';
+        registryEmpty.style.display = 'block';
+        registryEmpty.textContent = '(failed to load)';
+      }
     }
     refreshRegistry();
+
+    async function refreshStatus() {
+      try {
+        const status = await fetch('/api/status').then(r => r.json());
+        statusPane.textContent = `Conversations: ${status.conversations}\nTools: ${status.tools}\nRuns: ${status.runs}`;
+      } catch {
+        statusPane.textContent = '(failed to load)';
+      }
+    }
+
+    async function refreshMemory() {
+      try {
+        const data = await fetch('/api/memory').then(r => r.json());
+        const history = (data.history || []).slice(-10).map(h => `${new Date(h.ts).toLocaleString()} [${h.role}] ${h.content}`).join('\n');
+        const runs = (data.runs || []).slice(-5).map(r => `${new Date(r.ts).toLocaleString()} • ${r.goal}`).join('\n');
+        memoryPane.textContent = `Recent history:\n${history || '(none)'}\n\nRecent runs:\n${runs || '(none)'}`;
+        const lastRun = (data.runs || [])[data.runs.length - 1];
+        if (lastRun?.result) {
+          latestResult.textContent = JSON.stringify(lastRun.result, null, 2);
+        } else {
+          latestResult.textContent = '(none yet)';
+        }
+      } catch {
+        memoryPane.textContent = '(failed to load)';
+        latestResult.textContent = '(failed to load)';
+      }
+    }
+
+    async function refreshLogs() {
+      try {
+        const list = await fetch('/api/logs?limit=5').then(r => r.json());
+        recentLogs.textContent = list.map(l => `# ${l.id}\n${l.log}`).join('\n\n');
+      } catch { recentLogs.textContent = '(failed to load)'; }
+    }
+
+    async function refreshConfig() {
+      try {
+        const config = await fetch('/api/config').then(r => r.json());
+        document.getElementById('model').textContent = config.model || 'unknown';
+        if (typeof config.limits?.network === 'boolean') {
+          document.getElementById('allowNetwork').checked = config.limits.network;
+        }
+      } catch {
+        document.getElementById('model').textContent = 'unknown';
+      }
+    }
+
+    refreshStatus();
+    refreshMemory();
+    refreshLogs();
+    refreshConfig();
 
   async function runFallback(goal, btn) {
       try {
@@ -119,6 +211,9 @@
   summary.textContent = final.answer || '';
   result.textContent = JSON.stringify(final, null, 2);
         refreshRegistry();
+        refreshStatus();
+        refreshMemory();
+        refreshLogs();
       } catch (err) {
     appendLog('\nError: ' + (err?.message || String(err)) + '\n');
       } finally { btn.disabled = false; }
@@ -165,8 +260,8 @@
         summary.textContent = (data && data.answer) || '';
         result.textContent = JSON.stringify(data, null, 2);
       });
-      es.addEventListener('done', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); });
-      es.addEventListener('complete', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); });
+      es.addEventListener('done', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); refreshStatus(); refreshMemory(); refreshLogs(); });
+      es.addEventListener('complete', () => { try { es.close(); } catch {}; btn.disabled = false; refreshRegistry(); refreshStatus(); refreshMemory(); refreshLogs(); });
       es.addEventListener('error', (e) => {
         try { es.close(); } catch {}
         // Try to show a meaningful message if possible

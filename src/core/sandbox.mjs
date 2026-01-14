@@ -4,13 +4,13 @@ import { spawn } from 'node:child_process';
 
 /**
  * Sandboxed execution: prefers Docker if available, falls back to local isolated process with cwd inside sandbox.
- * Supports Python and Node.js tools. All file IO confined to sandboxDir.
- */
+   * Supports Python, Node.js, Bash, POSIX shell, and Ruby tools. All file IO confined to sandboxDir.
+   */
 export class Sandbox {
   constructor({ sandboxDir, logsDir, limits = {} }) {
     this.sandboxDir = sandboxDir;
     this.logsDir = logsDir;
-    this.limits = { timeoutMs: 60_000, memoryMb: 512, cpu: '0.5', network: false, ...limits };
+    this.limits = { timeoutMs: 60_000, memoryMb: 512, cpu: '0.5', network: true, ...limits };
   }
 
   async ensure() {
@@ -41,10 +41,11 @@ export class Sandbox {
     const hasNodePkg = await fs.pathExists(nodePkg);
     const envVars = {};
 
+    const languageConfig = this._getLanguageConfig(language, entry, args);
     const docker = await this.hasDocker();
     if (docker) {
-      const image = language === 'python' ? 'python:3.11-alpine' : 'node:20-alpine';
-      const cmd = language === 'python' ? ['python', entry, ...args] : ['node', entry, ...args];
+      const image = languageConfig.image;
+      const cmd = languageConfig.cmd;
       const argsDocker = ['run', '--rm', '-i',
         '-v', `${this.sandboxDir}:/app`, '-w', '/app',
         '--memory', `${this.limits.memoryMb}m`, '--cpus', `${this.limits.cpu}`
@@ -52,14 +53,14 @@ export class Sandbox {
       if (this.limits.network === false) argsDocker.push('--network', 'none');
       // Optional dependency install
       if (this.limits.network !== false) {
-        if (language === 'python' && hasPyReq) {
+        if (languageConfig.deps === 'python' && hasPyReq) {
           // install to a local site-packages directory inside the toolDir
           const site = path.posix.join('/app', toolRel, '.site');
           const req = path.posix.join('/app', toolRel, 'requirements.txt');
           await this._spawnWithLogs({ command: 'docker', args: [...argsDocker, image, 'sh', '-lc', `python -m pip install --no-cache-dir -t ${site} -r ${req}`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
           envVars['PYTHONPATH'] = site;
         }
-        if (language === 'node' && hasNodePkg) {
+        if (languageConfig.deps === 'node' && hasNodePkg) {
           await this._spawnWithLogs({ command: 'docker', args: [...argsDocker, image, 'sh', '-lc', `cd ${path.posix.join('/app', toolRel)} && npm install --omit=dev`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
         }
       }
@@ -67,20 +68,39 @@ export class Sandbox {
       return await this._spawnWithLogs({ command: 'docker', args: [...argsDocker, ...envArgs, image, ...cmd], stdin, logFile, cwd: this.sandboxDir, onStdout, onStderr });
     }
     // Fallback local execution confined to sandbox cwd
-    const command = language === 'python' ? 'python3' : 'node';
-    const execArgs = language === 'python' ? [entry, ...args] : [entry, ...args];
+    const command = languageConfig.local;
+    const execArgs = [entry, ...args];
     // Local optional dependency install
     if (this.limits.network !== false) {
-      if (language === 'python' && hasPyReq) {
+      if (languageConfig.deps === 'python' && hasPyReq) {
         const site = path.join(toolDir, '.site');
         await this._spawnWithLogs({ command: 'sh', args: ['-lc', `python3 -m pip install --no-cache-dir -t ${site} -r ${pyReq}`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
         envVars['PYTHONPATH'] = site;
       }
-      if (language === 'node' && hasNodePkg) {
+      if (languageConfig.deps === 'node' && hasNodePkg) {
         await this._spawnWithLogs({ command: 'sh', args: ['-lc', `cd ${toolDir} && npm install --omit=dev`], stdin: '', logFile, cwd: this.sandboxDir, onStdout, onStderr });
       }
     }
     return await this._spawnWithLogs({ command, args: execArgs, stdin, logFile, cwd: this.sandboxDir, onStdout, onStderr, env: envVars });
+  }
+
+  _getLanguageConfig(language, entry, args) {
+    switch (language) {
+      case 'python':
+        return { image: 'python:3.11-alpine', cmd: ['python', entry, ...args], local: 'python3', deps: 'python' };
+      case 'node':
+      case 'javascript':
+        return { image: 'node:20-alpine', cmd: ['node', entry, ...args], local: 'node', deps: 'node' };
+      case 'bash':
+        return { image: 'bash:5.2', cmd: ['bash', entry, ...args], local: 'bash' };
+      case 'sh':
+      case 'shell':
+        return { image: 'alpine:3.20', cmd: ['sh', entry, ...args], local: 'sh' };
+      case 'ruby':
+        return { image: 'ruby:3.3-alpine', cmd: ['ruby', entry, ...args], local: 'ruby' };
+      default:
+        throw new Error(`Unsupported language: ${language}`);
+    }
   }
 
   async _spawnWithLogs({ command, args, stdin, logFile, cwd, onStdout, onStderr, env }) {

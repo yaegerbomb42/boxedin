@@ -5,7 +5,7 @@ import { summarizeHistory } from './memory.mjs';
  * Gemini API Wrapper with context management and summarization.
  */
 export class GeminiClient {
-  constructor({ apiKey, model = 'gemini-1.5-flash', limits = {} }) {
+  constructor({ apiKey, model = 'gemini-3-flash', limits = {} }) {
     this.apiKey = apiKey;
     this.model = model;
     this.genAI = new GoogleGenerativeAI(apiKey);

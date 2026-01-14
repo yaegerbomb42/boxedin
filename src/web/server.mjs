@@ -2,7 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs-extra';
 import { runAgentLoop } from '../core/agent.mjs';
+import { getDefaultLimits } from '../core/limits.mjs';
 import { loadMemory } from '../core/memory.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,19 +16,17 @@ app.use(express.json({ limit: '1mb' }));
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const SANDBOX_DIR = path.join(__dirname, '..', '..', 'sandbox');
+const defaultLimits = getDefaultLimits();
+const defaultModel = process.env.GEMINI_MODEL || 'gemini-3-flash';
+const geminiApiKey = 'AIzaSyAvzNpziSosmT7m0av5mAHUn-LAdCQ5afI';
 
 function makeConfig() {
   return {
     dataDir: DATA_DIR,
     sandboxDir: SANDBOX_DIR,
-  gemini: { apiKey: 'AIzaSyAZaPRI1AUdH8pRJqHjQnfhLAKt9E5fTdo', model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' },
+    gemini: { apiKey: geminiApiKey, model: defaultModel },
     limits: {
-      maxTokens: 8192,
-      contextWindow: 20000,
-      timeoutMs: parseInt(process.env.SANDBOX_TIMEOUT_MS || '60000', 10),
-      memoryMb: parseInt(process.env.SANDBOX_MEMORY_MB || '512', 10),
-      cpu: process.env.SANDBOX_CPU || '0.5',
-      network: (process.env.SANDBOX_NETWORK === '1' || process.env.SANDBOX_NETWORK === 'true')
+      ...defaultLimits,
     }
   };
 }
@@ -36,6 +36,35 @@ app.use('/', express.static(path.join(__dirname, 'static')));
 app.get('/api/status', async (req, res) => {
   const mem = await loadMemory({ dataDir: DATA_DIR, sandboxDir: SANDBOX_DIR });
   res.json({ conversations: mem.history.length, tools: Object.keys(mem.tools).length, runs: mem.runs.length });
+});
+
+app.get('/api/config', (req, res) => {
+  res.json({ model: defaultModel, limits: defaultLimits });
+});
+
+app.get('/api/memory', async (req, res) => {
+  const mem = await loadMemory({ dataDir: DATA_DIR, sandboxDir: SANDBOX_DIR });
+  res.json({ history: mem.history, runs: mem.runs });
+});
+
+app.get('/api/logs', async (req, res) => {
+  const limit = parseInt(req.query.limit || '10', 10);
+  const runsDir = path.join(SANDBOX_DIR, 'runs');
+  if (!(await fs.pathExists(runsDir))) return res.json([]);
+  const entries = await fs.readdir(runsDir);
+  const withStats = await Promise.all(entries.map(async (name) => {
+    const logPath = path.join(runsDir, name, 'exec.log');
+    if (!(await fs.pathExists(logPath))) return null;
+    const stat = await fs.stat(logPath);
+    return { name, logPath, mtimeMs: stat.mtimeMs };
+  }));
+  const sorted = withStats.filter(Boolean).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, limit);
+  const logs = await Promise.all(sorted.map(async (item) => {
+    const content = await fs.readFile(item.logPath, 'utf8');
+    const tail = content.length > 4000 ? content.slice(-4000) : content;
+    return { id: item.name, log: tail };
+  }));
+  res.json(logs);
 });
 
 app.get('/api/tools', async (req, res) => {
